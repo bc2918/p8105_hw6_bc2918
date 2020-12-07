@@ -102,7 +102,6 @@ models_results_df %>%
 ## Problem 2
 
 Load and clean data.
-
 ```{r}
 baby_df = 
   read_csv("./data/birthweight.csv") %>% 
@@ -138,40 +137,48 @@ baby_df =
 
 #### Modeling 
 
-###### Model 1: my choice
+###### Model 1: proposed model
 
+Fit multiple linear regression with all variables available.
 ```{r}
 # fit all variables
 mul_fit = lm(bwt ~ ., data = baby_df)
 summary(mul_fit)
 ```
 
+Apply step-wide backward method to select variables based on lowest AIC values.
 ```{r}
-# use step-wide backward method to select variables based on lowest AIC values 
+# step-wide backward method (the output is very long so commented)
 # step(mul_fit, direction = "backward") 
 
-# this is the summery of the last step of the `step()`, check how this fit
-summary(lm(formula = bwt ~ babysex + bhead + blength + delwt + fincome + 
-    gaweeks + mheight + mrace + parity + ppwt + smoken, data = baby_df))
+# this is the last call of the `step()` method
+last_call = lm(formula = bwt ~ babysex + bhead + blength + delwt + fincome + 
+    gaweeks + mheight + mrace + parity + ppwt + smoken, data = baby_df)
+
+# check how it fits
+summary(last_call)
 ```
 
+Select variables with the most significant p-values according to the regression statistics based on the last call of the step-wide backward method.
 ```{r}
-# finally select variables with the most significant p-values according to the regression statistics above
+# subset selected variables
 fit_df =
   baby_df %>% select(bwt, babysex, bhead, blength, delwt, gaweeks, mheight, ppwt, smoken)
 
-# check regression dtatistics 
+# check regression statistics 
 model_1 = lm(bwt ~ ., data = fit_df)
 summary(model_1)
 ```
 
+Above is the regression statistics of the model fitted with the chosen predictors: `babysex`, `bhead`, `blength`, `delwt`, `gaweeks`, `mheight`, `ppwt`, `smoken`.
+
+Cleaned regression coefficients.
 ```{r}
 model_1 %>% 
   broom::tidy() %>% 
   select(term, estimate, p.value) %>% 
-  knitr::kable(digits = 3)
+  knitr::kable(digits = 4)
 ```
-
 
 Check residuals.
 ```{r}
@@ -181,11 +188,13 @@ fit_df %>%
   ggplot(aes(x = pred, y = resid)) +
   geom_point(alpha = 0.3) +
   labs(
-    title = "Predictor vs. Residual",
-    x = "Predictor",
+    title = "Predicton vs. Residual",
+    x = "Predicton",
     y = "Residual"
   )
 ```
+
+It could be observed that the residuals are mostly gathered around 0. However, there is quite a number of outliers with very high reidual values (around 1000) as the prediction value goes lower.
 
 ```{r include=FALSE}
 fit_df %>% 
@@ -207,7 +216,7 @@ model_2 = lm(bwt ~ blength + gaweeks, data = baby_df)
 model_2 %>% 
   broom::tidy() %>% 
   select(term, estimate, p.value) %>% 
-  knitr::kable(digits = 3)
+  knitr::kable(digits = 4)
 ```
 
 ###### Model 3: Head circumference, length, sex and all interactions between these
@@ -218,9 +227,12 @@ model_3 = lm(bwt ~ bhead * blength * babysex, data = baby_df)
 model_3 %>% 
   broom::tidy() %>% 
   select(term, estimate, p.value) %>% 
-  knitr::kable()
+  knitr::kable(digits = 4)
 ```
 
+###### Cross Validation
+
+Prepare training/testing spited samples.
 ```{r}
 cv_df = 
   crossv_mc(baby_df, 100) %>% 
@@ -230,27 +242,29 @@ cv_df =
     )
 ```
 
-###### Cross Validation
-
+Fit models with training data and calculate root-mean-square deviation for each model with test data.
 ```{r}
 cv_res = 
-  cv_df %>% 
-    mutate(
-        model_1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + 
-                                   gaweeks + mheight + ppwt + smoken, data = .x)),
-        model_2 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
-        model_3 = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))
-    ) %>% 
-    mutate(
-        rmse_model_1 = 
-          map2_dbl(model_1, test, ~rmse(model = .x, data = .y)),
-        rmse_model_2 = 
-          map2_dbl(model_2, test, ~rmse(model = .x, data = .y)),
-        rmse_medel_3 = 
-          map2_dbl(model_3, test, ~rmse(model = .x, data = .y))
-    )
+  cv_df %>%
+  # fit model with train data
+  mutate(
+      model_1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + 
+                                 gaweeks + mheight + ppwt + smoken, data = .x)),
+      model_2 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+      model_3 = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))
+  ) %>%
+  # calculate rmse with fitted models on test data
+  mutate(
+      rmse_model_1 = 
+        map2_dbl(model_1, test, ~rmse(model = .x, data = .y)),
+      rmse_model_2 = 
+        map2_dbl(model_2, test, ~rmse(model = .x, data = .y)),
+      rmse_medel_3 = 
+        map2_dbl(model_3, test, ~rmse(model = .x, data = .y))
+  )
 ```
 
+Plot the root-mean-square deviation distribution for each model.
 ```{r}
 cv_res %>% 
   select(starts_with("rmse")) %>% 
@@ -262,11 +276,113 @@ cv_res %>%
   ) %>% 
   mutate(model = fct_inorder(model)) %>% 
   ggplot(aes(x = model, y = rmse)) +
-  geom_violin() 
+  geom_violin() +
+  labs(
+    title = "Root-Mean-Square Deviation Distribution",
+    x = "Model",
+    y = "Root-Mean-Square Deviation"
+  )
 ```
 
+According to the plot, model 1 generally has the lowest rmse and model 2 has the highest rmse. The model 1 I proposed is the model fitted the best among the three as it has the lowest rmse values.
 
+## Problem 3
 
+Load the data.
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
 
+Generate bootstrap samples, fit the linear regression model for each sample and calculate values needed to compute the estimated value of interest: r squared and log(β0 * β1).
+```{r}
+set.seed(99)
 
+# bootstrap
+bs_df =
+  weather_df %>% 
+  modelr::bootstrap(n = 5000) 
+
+# fit model and calculate statistics
+bs_res = 
+  bs_df %>% 
+   mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    result_tidy = map(models, broom::tidy),
+    result_glance = map(models, broom::glance)
+    ) %>% 
+  unnest(result_tidy, result_glance) %>% 
+  mutate(term = recode(term, '(Intercept)' = 'intercept')) %>% 
+  select(id = .id, term, estimate, r.squared) %>% 
+  mutate(id = as.numeric(id))
+
+# preview results
+bs_res %>% head() %>% knitr::kable(digits = 3)
+```
+
+Plot density of R squared hat values.
+```{r fig.width = 6, fig.height = 4}
+bs_res %>% 
+  ggplot(aes(x = r.squared)) +
+  geom_density() +
+  labs(
+    title = "Distribution of R Squared Hat",
+    x = "R Squared Hat",
+    y = "Density"
+  )
+```
+
+It could be observed that the r squared hat are generally normally distributed in a bell shape around 0.913, indicating that for most samples about 90% variation in tmax could be explained by tmin.
+
+Calculate and plot density of log(β0 hat * β1 hat).
+```{r fig.width = 6, fig.height = 4}
+log_df = 
+  bs_res %>%
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+    ) %>% 
+  mutate(log_muti_beta = log(intercept*tmin)) 
+
+log_df %>% 
+  ggplot(aes(x = log_muti_beta)) +
+  geom_density() +
+  labs(
+        title = "Distribution of the log(β0 hat * β1 hat)",
+        x = "log(β0 hat * β1 hat)",
+        y = "Density"
+    )
+```
+
+It could be observed that the log(β0 hat * β1 hat) are also generally normally distributed in a bell shape and centered around 2.02.
+
+Identify the 2.5% and 97.5% quantile.
+```{r}
+tibble(
+  quantile = c("2.5 %", "97.5 %"),
+  'r.squared' = quantile(bs_res$r.squared, probs = c(0.025,0.975)),
+  'log.muti.beta' = quantile(log_df$log_muti_beta, probs = c(0.025,0.975))
+) %>% 
+  pivot_longer(
+    r.squared:log.muti.beta,
+    names_to = "estimate",
+    values_to = "value"
+  ) %>% 
+  pivot_wider(
+    names_from = quantile,
+    values_from = value
+  ) %>% 
+  knitr::kable(digits = 3, align = "lcc")
+```
+
+The 95% confidence interval for r squared hat and log(β0 hat * β1 hat) are shown above.
 
